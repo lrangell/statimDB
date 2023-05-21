@@ -1,12 +1,15 @@
-use nom::branch::alt;
-use nom::bytes::complete::tag;
-use nom::bytes::complete::take;
-use nom::character::complete::not_line_ending;
-use nom::character::complete::{crlf, digit1};
-use nom::combinator::map_res;
-use nom::multi::many0;
-use nom::sequence::{delimited, preceded, terminated, tuple};
-use nom::IResult;
+use nom::{
+    branch::alt,
+    bytes::complete::take,
+    character::complete::{crlf, digit1, not_line_ending},
+    combinator::{map, opt},
+    multi::many0,
+    sequence::{delimited, preceded, terminated, tuple},
+    IResult,
+};
+use nom_supreme::parser_ext::ParserExt;
+use nom_supreme::tag::complete::tag;
+use nom_supreme::{error::ErrorTree, final_parser::final_parser};
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub enum Expr {
@@ -17,41 +20,50 @@ pub enum Expr {
     Error(String),
 }
 
-pub fn null(input: &str) -> IResult<&str, Expr> {
-    map_res(tag("$-1\r\n"), |_| Ok::<Expr, &str>(Expr::Null))(input)
+macro_rules! delimited_exp {
+    ($tag: literal, $to:expr) => {
+        map(
+            delimited(
+                tag::<&str, &str, ErrorTree<&str>>($tag),
+                not_line_ending,
+                crlf,
+            ),
+            |content: &str| $to(content.into()),
+        )
+    };
 }
 
-pub fn error(input: &str) -> IResult<&str, Expr> {
-    map_res(
-        delimited(tag("+"), not_line_ending, crlf),
-        |content: &str| Ok::<Expr, &str>(Expr::Error(content.into())),
-    )(input)
+pub fn parse(input: &str) -> Result<Expr, ErrorTree<&str>> {
+    final_parser(alt((parse_element, parse_array)))(input)
+}
+fn parse_element(input: &str) -> IResult<&str, Expr, ErrorTree<&str>> {
+    let error = delimited_exp!("-", Expr::Error);
+    let null = delimited_exp!("-1", |_: &str| { Expr::Null });
+    let simple_string = delimited_exp!("+", Expr::String);
+    let integer = delimited_exp!(":", |i: &str| {
+        i.parse::<i64>().map(Expr::Integer).unwrap()
+    });
+    let mut elements = alt((null, error, simple_string, integer, string));
+    elements(input)
+}
+fn parse_array(input: &str) -> IResult<&str, Expr, ErrorTree<&str>> {
+    let array_elements = map(many0(parse_element), Expr::Array);
+    let array_size = tuple((tag("*"), opt(tag("-")), digit1, crlf));
+    preceded(array_size, array_elements)(input)
 }
 
-pub fn simple_string(input: &str) -> IResult<&str, Expr> {
-    map_res(
-        delimited(tag("+"), not_line_ending, crlf),
-        |content: &str| Ok::<Expr, &str>(Expr::String(content.into())),
-    )(input)
-}
-
-pub fn string(input: &str) -> IResult<&str, Expr> {
-    let (remaining, size) = map_res(delimited(tag("$"), digit1, crlf), |i: &str| {
-        i.parse::<usize>()
-    })(input)?;
-    let (remaining, content) = terminated(take(size), crlf)(remaining)?;
-    Ok((remaining, Expr::String(content.to_string())))
-}
-
-pub fn integer(input: &str) -> IResult<&str, Expr> {
-    map_res(delimited(tag(":"), digit1, crlf), |i: &str| {
-        i.parse::<i64>().map(Expr::Integer)
-    })(input)
-}
-
-pub fn array(input: &str) -> IResult<&str, Expr> {
-    let element = many0(alt((string, integer, null)));
-    let array_size = tuple((tag("*"), digit1, crlf));
-    let (remaining, array) = preceded(array_size, element)(input)?;
-    Ok((remaining, Expr::Array(array)))
+fn string(input: &str) -> IResult<&str, Expr, ErrorTree<&str>> {
+    let (remaining, size) = map(
+        delimited(tag::<_, &str, _>("$"), tuple((opt(tag("-")), digit1)), crlf),
+        |(neg, i)| match neg {
+            Some(_) => -1,
+            None => i.parse::<isize>().unwrap(),
+        },
+    )(input)?;
+    match size {
+        -1 => Ok((remaining, Expr::Null)),
+        _ => map(terminated(take(size as usize), crlf), |s: &str| {
+            Expr::String(s.into())
+        })(remaining),
+    }
 }
