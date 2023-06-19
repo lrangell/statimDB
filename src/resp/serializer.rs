@@ -4,7 +4,7 @@ macro_rules! delimited {
     };
 }
 
-trait RespString {
+pub trait RespString {
     fn resp(&self) -> String;
 }
 
@@ -30,6 +30,16 @@ impl<T: RespString> RespString for Vec<T> {
     }
 }
 
+impl<T: RespString> RespString for Result<T, anyhow::Error> {
+    fn resp(&self) -> String {
+        match self {
+            Ok(s) => s.resp(),
+            Err(e) => delimited("-", e),
+        }
+    }
+}
+
+#[inline]
 fn delimited(start: &str, content: impl ToString) -> String {
     format!("{}{}\r\n", start, content.to_string())
 }

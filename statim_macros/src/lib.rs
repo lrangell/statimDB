@@ -58,8 +58,8 @@ pub fn command(_args: TokenStream, input: TokenStream) -> TokenStream {
         .map(|(i, _t)| quote! {args.get(#i).cloned().unwrap().into()});
 
     let dispatcher = quote! {
-        fn #dispacher_function_name(args: &[resp::Expr]) -> futures::future::BoxFuture<Result<String>> {
-        Box::pin(async move { #original_function_name(#(#call_args),*).await })
+        fn #dispacher_function_name(args: &[resp::Expr]) -> futures::future::BoxFuture<String> {
+        Box::pin(async move { #original_function_name(#(#call_args),*).await.resp() })
     }
     };
 
@@ -83,10 +83,11 @@ pub fn build_dispatch_table(_input: TokenStream) -> TokenStream {
             table_ref.insert(#command, #command_dispatcher);
         }
     });
-    let init = quote! {async fn init_table() {
-        let mut table_ref = TABLE.get().unwrap().lock().await;
-        TABLE.get_or_init(|| Mutex::new(HashMap::new()));
-        #(#inserts)*
+    let init = quote! {
+        pub async fn init_table() {
+            TABLE.get_or_init(|| Mutex::new(HashMap::new()));
+            let mut table_ref = TABLE.get().unwrap().lock().await;
+            #(#inserts)*
     }};
     init.into()
 }

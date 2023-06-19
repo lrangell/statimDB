@@ -10,6 +10,18 @@ pub enum Expr {
     Error(String),
 }
 
+impl ToString for Expr {
+    fn to_string(&self) -> String {
+        match self {
+            Expr::String(s) => s.to_string(),
+            Expr::Integer(_) => todo!(),
+            Expr::Array(_) => todo!(),
+            Expr::Null => todo!(),
+            Expr::Error(_) => todo!(),
+        }
+    }
+}
+
 unsafe impl Send for Expr {}
 
 unsafe impl Sync for Expr {}
