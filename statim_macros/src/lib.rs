@@ -33,7 +33,7 @@ impl Parse for FunctionNode {
     }
 }
 lazy_static! {
-    static ref S: Mutex<HashSet<String>> = Mutex::new(HashSet::new());
+    static ref COMMANDS: Mutex<HashSet<String>> = Mutex::new(HashSet::new());
 }
 
 #[proc_macro_attribute]
@@ -48,6 +48,8 @@ pub fn command(_args: TokenStream, input: TokenStream) -> TokenStream {
         &format!("{}_", &original_function_name),
         syn::spanned::Spanned::span(&original_function_name),
     );
+
+    COMMANDS.lock().unwrap().insert(ast.function_name);
 
     let call_args = ast
         .args_types
@@ -71,8 +73,22 @@ pub fn command(_args: TokenStream, input: TokenStream) -> TokenStream {
 }
 
 #[proc_macro]
-pub fn build_table(_input: TokenStream) -> TokenStream {
-    todo!()
+pub fn build_dispatch_table(_input: TokenStream) -> TokenStream {
+    let parsed_commands = COMMANDS.lock().unwrap();
+    let inserts = parsed_commands.iter().map(|command| {
+        let command_dispatcher =
+            syn::Ident::new(&format!("{}_", &command), proc_macro2::Span::call_site());
+
+        quote! {
+            table_ref.insert(#command, #command_dispatcher);
+        }
+    });
+    let init = quote! {async fn init_table() {
+        let mut table_ref = TABLE.get().unwrap().lock().await;
+        TABLE.get_or_init(|| Mutex::new(HashMap::new()));
+        #(#inserts)*
+    }};
+    init.into()
 }
 
 #[proc_macro_derive(toParams)]
